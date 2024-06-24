@@ -21,7 +21,7 @@ class Thimble:
     - tau: the step size of the flow.
     - epsilon: the epsilon for gradient computation.
     """
-    def __init__(self, xmin, xmax, delta, thre=30, tau=0.05, epsilon=1e-6):
+    def __init__(self, xmin, xmax, delta, thre=-10, tau=0.05, epsilon=1e-6, x_poles=None):
         self.xmin = xmin
         self.xmax = xmax
 
@@ -33,6 +33,8 @@ class Thimble:
         self.epsilon = epsilon
         # step size of flow
         self.tau = tau
+        # poles on real x axis
+        self.x_poles = x_poles
 
         self.initialize_points()
 
@@ -53,6 +55,10 @@ class Thimble:
         """
         N = int((self.xmax-self.xmin)/self.x_delta)
         self.x = np.linspace(self.xmin, self.xmax, N) + 1j*np.zeros(N)
+        if self.x_poles is not None:
+            for x_pole in self.x_poles:
+                i = np.where(np.abs(self.x-x_pole) < self.x_delta)[0]
+                self.x[i]+= 1j*self.x_delta/2
         self.active = np.ones(self.x.size, dtype=bool)
 
     def plot(self, xyrange=None):
@@ -120,6 +126,12 @@ class Thimble:
         - The value of phi at x.
         """
         return self._phi_func(x, **self._phi_kwargs)
+
+    def integrand(self, x):
+        """
+        Compute the integrand of the Pichard Lefschetz algorithm at x.
+        """
+        return np.exp(self.phi(x))
 
     def h(self, x):
         """
@@ -255,19 +267,66 @@ class Thimble:
         self.x = self.x[i]
         self.active = self.active[i]
         
-    def romberg(self, N=3, phi=None):
+    def romberg(self, N=3, integrand=None):
         """
         Perform Romberg integration for each active simplex and sum it
         to get the Pichard Lefschetz integral.
         """
-        if phi is None:
-            phi = self.phi
+        if integrand is None:
+            integrand = self.integrand
         # get left and right points of active simplices
         x_left  = self.active_simplex_left()
         x_right = self.active_simplex_right()
         # compute the integral for each simplex
-        I = np.array([romberg(phi, x_left[i], x_right[i], max_iter=N) for i in range(x_left.size-1)])
+        I = np.array([romberg(integrand, x_left[i], x_right[i], max_iter=N) for i in range(x_left.size-1)])
         return np.sum(I)
+
+def parametrize(phi, p, nthimbles, niter=50, plot=False, **kwargs):
+    """
+    Parametrize the thimbles by the parameter p.
+
+    Parameters:
+    - phi: a function of (x, p)
+    - p: the parameter p
+    - nthimbles: the number of thimbles to use
+
+    Returns:
+    - integral
+    """
+    # sort parameters
+    args = np.argsort(p)
+    p = p[args]
+
+    # Group parameters
+    if p.size % nthimbles == 0:
+        npbin = p.size // nthimbles
+    else:
+        npbin = p.size // nthimbles + 1
+    ind = np.arange(p.size)
+    group = [ind[i*npbin:(i+1)*npbin] for i in range(nthimbles)]
+
+    # integrate
+    I = np.zeros(p.size, dtype=complex)
+    for g in group:
+        if g.size == 0: continue
+        # compute thimble at mean p of this group
+        mean_p = np.mean(p[g])
+        kwargs2 = kwargs.copy()
+        # kwargs2['xmin'] += mean_p
+        # kwargs2['xmax'] += mean_p
+        thimble = Thimble(**kwargs2)
+        thimble.set_phi(lambda x: phi(x, mean_p))
+        thimble.run(niter=niter)
+        thimble.plot() if plot else None
+        # compute integral for each parameter in this group
+        for i in g:
+            I[i] = thimble.romberg(integrand=lambda x: np.exp(phi(x, p[i])))
+
+    # unsort    
+    out = np.zeros(p.size, dtype=complex)
+    out[args] = I
+
+    return out
 
 def romberg(func, xmin, xmax, tol=1e-10, max_iter=10):
     """
@@ -303,5 +362,5 @@ def romberg(func, xmin, xmax, tol=1e-10, max_iter=10):
         # Check for convergence
         if np.abs(R[i, i] - R[i-1, i-1]) < tol:
             return R[i, i]
-    
+
     return R[max_iter-1, max_iter-1]
