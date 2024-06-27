@@ -11,6 +11,8 @@ import matplotlib.pyplot as plt
 import time
 from matplotlib.collections import PolyCollection
 
+print('==== NOTE: STILL IN DEVELOPMENT STAGE ====')
+
 class Points:
     dtype = [('ID', int), ('x', complex), ('y', complex), ('active', bool)]
     def __init__(self, *points):
